@@ -2,10 +2,17 @@
 #
 # Field is numbered 1 to 9, left to right, up to bottom.
 # Empty field corresponds to value 0, others - to value 1 through 8.
+#
 # State variables:
-# For each field - 9 variables which encode which of the values 0 through 8 is on the field.
-# Naming - s{t}_f{i}_n{j}, where {i} - field number, {j} - stone number, {t} - number of state (time).
-# In total 81 state variables.
+#   For each field - 9 variables which encode which of the values 0 through 8 is on the field.
+#   Naming - s{t}_f{i}_n{j}, where {i} - field number, {j} - stone number, {t} - number of state (time).
+#   In total 81 state variables.
+#
+# Action variables:
+#   All valid pairs of fields from/to is corrensponding to 8 moves - one for each stone.
+#   In total 8*24 = 192 moves and 192 action variables.
+#   Naming - mv{t}_s{j}_p{ip}{ipp}, where j - stone number (1-8, doesn't include 0 stone),
+#   ip and ipp - positions to and from from pairs of possible moves (see constant POSSIBLE_MOVES).
 #
 # End state would be [1, 2, 3, 4, 5, 6, 7, 8, 0]
 
@@ -53,9 +60,9 @@ def generate_state_program(state: List[int], step: int = 0) -> List[str]:
     for field in range(1, 10):
         cur_field_line = ""
         for stone in range(9):
-            cur_variable = f"s{step}_f{field}_n{stone}"
             cur_field_line += (
-                generate_prefixes(state[field - 1] == stone) + cur_variable + " & "
+                generate_prefixes(state[field - 1] == stone)
+                + f"s{step}_f{field}_n{stone} & "
             )
         # remove last conjunction from the line
         cur_field_line = cur_field_line[:-3]
@@ -70,8 +77,20 @@ def generate_action_changes(step: int) -> List[str]:
     for ip, ipp in POSSIBLE_MOVES:
         for j in range(1, 9):
             left_side = "mv{step}_s{j}_p{ip}{ipp}"
-            precondition = "(s{step}_f{ip}_n{j} & s{step}_f{ipp}_n0)"
-            effect = "(s{step1}_f{ipp}_n{j} & s{step1}_f{ip}_n0)"
+            # in precondition we also need to include that to move a stone
+            # only one certain stone should be in a starting location
+            preconditions_list = ["s{step}_f{ip}_n{j}", "s{step}_f{ipp}_n0"]
+            no_curstone_set = set(range(9))
+            no_curstone_set.remove(j)
+            preconditions_list.extend(
+                ["!s{step}_f{ip}_n" + str(j) for j in no_curstone_set]
+            )
+            # and no stones (only stone zero) - in target
+            preconditions_list.extend(
+                ["!s{step}_f{ipp}_n" + str(j) for j in range(1, 9)]
+            )
+            precondition = "(" + " & ".join(preconditions_list) + ")"
+            effect = "(s{step1}_f{ipp}_n{j} & s{step1}_f{ip}_n0 & !s{step1}_f{ipp}_n0 & !s{step1}_f{ip}_n{j})"
             action_change = f"({left_side} -> ({precondition} & {effect}))".format(
                 step=step, step1=step + 1, ip=ip, ipp=ipp, j=j
             )
@@ -156,7 +175,8 @@ def print_program(program: List[str]):
 if __name__ == "__main__":
     # parse arguments
     parser = argparse.ArgumentParser(
-        prog="puzzle_sat_encoding", description="Generate SAT encoding for a game"
+        prog="puzzle_sat_encoding.py",
+        description="Generate SAT encoding for a 3x3 sliding puzzle",
     )
     parser.add_argument(
         "starting_field", help="List representing starting field of the game"
